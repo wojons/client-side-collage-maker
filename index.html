@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Client‑side Collage Maker</title>
+  <style>
+    :root{
+      --bg:#0b1020; --panel:#12182d; --muted:#8da2c8; --accent:#59e1c7; --accent2:#b58cff;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;font-family:ui-sans-serif,system-ui,Segoe UI,Roboto,Helvetica,Arial;
+      background:radial-gradient(1200px 800px at 10% 0%, #16214a 0%, var(--bg) 60%);
+      color:#e9eeff; display:flex; flex-direction:column}
+    header{padding:16px 20px; display:flex; gap:12px; align-items:center; border-bottom:1px solid #22305d;background:linear-gradient(180deg,#0e1630,#0b1125)}
+    header h1{font-size:18px;margin:0;font-weight:700;letter-spacing:.2px}
+    header .hint{color:var(--muted);font-size:12px}
+
+    .wrap{display:grid; grid-template-columns: 280px 1fr; gap:16px; padding:16px; min-height:100vh}
+    @media (max-width: 960px){ .wrap{grid-template-columns:1fr; height:auto}}
+
+    .panel{background:var(--panel); border:1px solid #24346b; border-radius:16px; padding:14px; box-shadow:0 10px 30px rgba(0,0,0,.3)}
+    .panel h2{font-size:14px; text-transform:uppercase; letter-spacing:.12em; color:#cbd7ff; margin:0 0 10px}
+
+    #drop{border:2px dashed #3550a9; border-radius:14px; padding:16px; text-align:center; cursor:pointer; background:#0e1531}
+    #drop.drag{border-color:var(--accent); background:#0b1a33}
+    #file{display:none}
+    .btn{background:linear-gradient(90deg,var(--accent),var(--accent2)); color:#0c1025; font-weight:700; border:none; padding:10px 14px; border-radius:12px; cursor:pointer}
+    .btn:disabled{opacity:.5; cursor:not-allowed}
+    .btn.secondary{background:#27356a; color:#d3dcff}
+
+    .thumbs{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:12px; max-height:260px; overflow:auto; padding:4px}
+    .thumb{position:relative; border:1px solid #2b3d7b; border-radius:12px; overflow:hidden; background:#0b132b}
+    .thumb img{display:block; width:100%; height:110px; object-fit:cover}
+    .thumb .cap{position:absolute; inset:auto 8px 8px 8px; display:flex; justify-content:space-between; align-items:center; gap:8px}
+    .chip{font-size:11px; padding:2px 6px; border-radius:999px; background:#1a2550; color:#c7d4ff; border:1px solid #2b3e78}
+    .drag{position:absolute; inset:0; outline:2px dashed transparent}
+    .thumb[draggable="true"]{cursor:grab}
+    .thumb.dragging{opacity:.5; outline:2px dashed var(--accent)}
+
+    .grid{display:grid; grid-template-columns:repeat(2, 1fr); gap:16px}
+    .row{display:grid; grid-template-columns:1fr 1fr; column-gap:8px; row-gap:8px; align-items:center; margin:8px 0}
+    label{font-size:12px; color:#c9d4ff}
+    input[type="number"], input[type="text"], select{width:100%; background:#0d1635; border:1px solid #283a7b; color:#e6ebff; border-radius:10px; padding:8px}
+    input[type="color"]{height:36px; width:52px; border:none; background:none}
+    .tiny{font-size:11px; color:#94a6d6}
+
+    /* Sticky sidebar and form structure */
+    #controls{position:sticky; top:16px; align-self:start}
+    fieldset{border:1px solid #24346b; border-radius:12px; padding:12px; margin-top:12px}
+    legend{font-size:12px; text-transform:uppercase; letter-spacing:.12em; color:#cbd7ff; padding:0 6px}
+#manualRowsCols{display:none}
+
+    canvas{width:100%; height:100%; background:#0a0f24; border-radius:16px; border:1px solid #25366f}
+    .canvaswrap{position:relative; height:100%; display:flex; flex-direction:column}
+    .toolbar{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:8px 0}
+    .status{color:#9fb3ea; font-size:12px; margin-left:auto}
+
+    footer{padding:10px 16px; text-align:center; color:#7f93c7; font-size:12px}
+    a.link{color:#8fe5ff}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Client‑side Collage Maker</h1>
+    <div class="hint">Drop images → tweak layout → Download PNG (no server used)</div>
+  </header>
+
+  <div class="wrap">
+    <!-- Controls -->
+    <section class="panel" id="controls">
+      <h2>Images</h2>
+      <div id="drop" tabindex="0" aria-label="Drop images here or click to pick">
+        <strong>Drag & drop</strong> JPG/PNG/WebP… or <button class="btn secondary" id="pick">Browse</button>
+        <input id="file" type="file" multiple accept="image/*" />
+        <div class="tiny" style="margin-top:6px">Tip: you can drag thumbnails to reorder</div>
+      </div>
+      <div class="thumbs" id="thumbs" aria-live="polite"></div>
+
+      <fieldset>
+        <legend>Layout</legend>
+        <div class="row">
+          <label>Layout mode</label>
+          <div style="display:flex; gap:10px; align-items:center">
+            <label><input type="radio" name="layoutMode" id="modeAuto" value="auto" checked> Auto</label>
+            <label><input type="radio" name="layoutMode" id="modeManual" value="manual"> Manual</label>
+          </div>
+        </div>
+
+        <div id="manualRowsCols">
+          <div class="row"><label>Columns</label><input id="cols" type="number" value="5" min="1" max="40"></div>
+          <div class="row"><label>Rows</label><input id="rows" type="number" value="2" min="1" max="40"></div>
+        </div>
+
+        <div class="row"><label>Fit mode</label>
+          <select id="fit">
+            <option value="cover" selected>Cover (crop to fill)</option>
+            <option value="contain">Contain (no crop)</option>
+            <option value="fill">Fill (stretch)</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <label>Padding (px)</label>
+          <div style="display:flex; gap:8px; align-items:center">
+            <input id="pad" type="range" value="8" min="0" max="200">
+            <span class="tiny" id="padVal">8</span>
+          </div>
+        </div>
+
+        <div class="row">
+          <label>Corner radius (px)</label>
+          <div style="display:flex; gap:8px; align-items:center">
+            <input id="radius" type="range" value="12" min="0" max="300">
+            <span class="tiny" id="radiusVal">12</span>
+          </div>
+        </div>
+
+        <div class="row"><label>Tight packing</label><input id="tight" type="checkbox" checked></div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Canvas</legend>
+        <div class="row">
+          <label>Max width (px)</label>
+          <div style="display:flex; gap:8px; align-items:center">
+            <input id="maxW" type="number" value="4096" min="256" step="64">
+            <label class="tiny"><input id="maxWAuto" type="checkbox" checked> Auto</label>
+          </div>
+        </div>
+        <div class="row">
+          <label>Max height (px)</label>
+          <div style="display:flex; gap:8px; align-items:center">
+            <input id="maxH" type="number" value="4096" min="256" step="64">
+            <label class="tiny"><input id="maxHAuto" type="checkbox" checked> Auto</label>
+          </div>
+        </div>
+        <div class="row"><label>Background</label>
+          <input id="bg" type="text" value="#0b1020" title="Any CSS color"/>
+          <input id="bgPick" type="color" value="#0b1020" />
+        </div>
+        <div class="row">
+          <label>Export scale</label>
+          <div style="display:flex; gap:8px; align-items:center">
+            <input id="scale" type="range" value="1" min="0.5" max="4" step="0.5">
+            <span class="tiny" id="scaleVal">1x</span>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Export</legend>
+        <div class="row" style="grid-template-columns: 1fr auto auto; align-items:center; margin-top:6px">
+          <div></div>
+          <button class="btn secondary" id="clear">Clear</button>
+          <button class="btn" id="render">Render & Download PNG</button>
+        </div>
+      </fieldset>
+    </section>
+
+    <!-- Canvas -->
+    <section class="panel canvaswrap">
+      <div class="toolbar">
+        <button class="btn" id="download" disabled>Download PNG</button>
+        <span class="status" id="status">No image rendered yet.</span>
+      </div>
+      <canvas id="canvas" width="2048" height="2048" aria-label="Output canvas"></canvas>
+    </section>
+  </div>
+
+  <footer>All processing is client‑side. Images never leave your device. | <a class="link" href="#" id="demo">Load sample gradient tiles</a></footer>
+
+<script>
+(() => {
+  const $ = sel => document.querySelector(sel);
+  const drop = $('#drop');
+  const input = $('#file');
+  const thumbs = $('#thumbs');
+  const pick = $('#pick');
+  const canvas = $('#canvas');
+  const ctx = canvas.getContext('2d');
+  const status = $('#status');
+  const renderBtn = $('#render');
+  const downloadBtn = $('#download');
+  const clearBtn = $('#clear');
+  const bgTxt = $('#bg');
+  const bgPick = $('#bgPick');
+  const demo = $('#demo');
+
+  // New controls
+  const modeAuto = document.querySelector('#modeAuto');
+  const modeManual = document.querySelector('#modeManual');
+  const manualRowsCols = document.querySelector('#manualRowsCols');
+  const padRange = document.querySelector('#pad');
+  const padVal = document.querySelector('#padVal');
+  const radiusRange = document.querySelector('#radius');
+  const radiusVal = document.querySelector('#radiusVal');
+  const maxWAutoChk = document.querySelector('#maxWAuto');
+  const maxHAutoChk = document.querySelector('#maxHAuto');
+  const maxWInput = document.querySelector('#maxW');
+  const maxHInput = document.querySelector('#maxH');
+  const scaleRange = document.querySelector('#scale');
+  const scaleVal = document.querySelector('#scaleVal');
+  const tightChk = document.querySelector('#tight');
+
+  function syncControls(){
+    if (manualRowsCols) manualRowsCols.style.display = (modeManual && modeManual.checked) ? '' : 'none';
+    // Disable manual inputs when not in manual mode
+    const rowsInput = document.querySelector('#rows');
+    const colsInput = document.querySelector('#cols');
+    if (rowsInput && colsInput){
+      const isManual = !!(modeManual && modeManual.checked);
+      rowsInput.disabled = colsInput.disabled = !isManual;
+    }
+    if (maxWInput) maxWInput.disabled = !!(maxWAutoChk && maxWAutoChk.checked);
+    if (maxHInput) maxHInput.disabled = !!(maxHAutoChk && maxHAutoChk.checked);
+    if (padVal && padRange) padVal.textContent = String(+padRange.value|0);
+    if (radiusVal && radiusRange) radiusVal.textContent = String(+radiusRange.value|0);
+    if (scaleVal && scaleRange) scaleVal.textContent = `${(+scaleRange.value).toFixed(1).replace(/\.0$/,'')}x`;
+  }
+  [modeAuto, modeManual, maxWAutoChk, maxHAutoChk, padRange, radiusRange, scaleRange].forEach(el => el && el.addEventListener('input', syncControls));
+  syncControls();
+
+  const state = {
+    items: [], // { name,file,bitmap,url,w,h,ar }
+    layoutMode: 'auto', rows: 2, cols: 5,
+    padding: 8, radius: 12, fit: 'cover',
+    tightPacking: true,
+    maxWAuto: true, maxHAuto: true, maxW: 4096, maxH: 4096,
+    exportScale: 1,
+    didAutoDefaults: false
+  }; // state
+
+  // Keep state.layoutMode in sync with radios
+  ;[modeAuto, modeManual].forEach(el => el && el.addEventListener('input', ()=>{
+    state.layoutMode = (modeManual && modeManual.checked) ? 'manual' : 'auto';
+    syncControls();
+  }));
+
+  // ---------- Utils ----------
+  function human(n){
+    return new Intl.NumberFormat().format(n)
+  }
+  function el(tag, attrs={}, children=[]) {
+    const e = document.createElement(tag);
+    Object.entries(attrs).forEach(([k,v])=>{
+      if (k === 'class') e.className = v; else if (k==='html') e.innerHTML=v; else e.setAttribute(k,v);
+    });
+    children.forEach(c => e.appendChild(c));
+    return e;
+  }
+  async function fileToBitmap(file){
+    // CreateImageBitmap respects EXIF orientation with imageOrientation:'from-image'
+    const buf = await file.arrayBuffer();
+    const blob = new Blob([buf], {type:file.type});
+    return await createImageBitmap(blob, { imageOrientation:'from-image' });
+  }
+
+  // ---------- Drag & Drop / Input ----------
+  function addFiles(files){
+    const list = [...files].filter(f => f.type.startsWith('image/'));
+    if (!list.length) return;
+    Promise.all(list.map(async (file) => {
+      const bitmap = await fileToBitmap(file);
+      const url = URL.createObjectURL(file);
+      return { name:file.name, file, bitmap, url, w: bitmap.width, h: bitmap.height, ar: bitmap.width / bitmap.height };
+    })).then(added => {
+      state.items.push(...added);
+      // Smart defaults on first drop
+      if (!state.didAutoDefaults){
+        state.layoutMode = 'auto';
+        state.padding = 8; state.radius = 12; state.fit = 'cover';
+        state.maxWAuto = true; state.maxHAuto = true; state.exportScale = 1;
+        if (modeAuto) modeAuto.checked = true;
+        if (tightChk) tightChk.checked = true;
+        if (padRange) padRange.value = String(state.padding);
+        if (radiusRange) radiusRange.value = String(state.radius);
+        if (scaleRange) scaleRange.value = String(state.exportScale);
+        if (maxWAutoChk) maxWAutoChk.checked = true;
+        if (maxHAutoChk) maxHAutoChk.checked = true;
+        syncControls();
+        state.didAutoDefaults = true;
+      }
+      refreshThumbs();
+    }).catch(err => alert('Error loading some images: '+err.message));
+  }
+
+  drop.addEventListener('click', () => input.click());
+  pick.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); input.click(); });
+  input.addEventListener('change', (e) => { addFiles(input.files); input.value=''; });
+
+  ['dragenter','dragover'].forEach(t => drop.addEventListener(t, (e)=>{e.preventDefault(); drop.classList.add('drag');}));
+  ;['dragleave','drop'].forEach(t => drop.addEventListener(t, (e)=>{e.preventDefault(); drop.classList.remove('drag');}));
+  drop.addEventListener('drop', (e)=> addFiles(e.dataTransfer.files));
+
+  // ---------- Thumbnails (sortable) ----------
+  function refreshThumbs(){
+    thumbs.innerHTML='';
+    state.items.forEach((it, idx) => {
+      const li = el('div', { class:'thumb', draggable:'true', 'data-idx':idx });
+      const img = el('img', { src: it.url, alt: it.name });
+      const cap = el('div', { class:'cap' }, [
+        el('span', { class:'chip' , html:`${idx+1}` })
+      ]);
+      // remove button
+      const rm = el('button', { class:'btn secondary', style:'padding:6px 8px; font-size:12px' });
+      rm.textContent='Remove';
+      rm.addEventListener('click', ()=>{ state.items.splice(idx,1); refreshThumbs(); });
+      cap.appendChild(rm);
+      li.appendChild(img); li.appendChild(cap);
+
+      // Drag sorting
+      li.addEventListener('dragstart', ev => { li.classList.add('dragging'); ev.dataTransfer.setData('text/plain', idx); });
+      li.addEventListener('dragend', () => li.classList.remove('dragging'));
+      li.addEventListener('dragover', ev => { ev.preventDefault(); });
+      li.addEventListener('drop', ev => {
+        ev.preventDefault();
+        const from = +ev.dataTransfer.getData('text/plain');
+        const to = idx;
+        if (from===to) return;
+        const [moved] = state.items.splice(from,1);
+        state.items.splice(to,0,moved);
+        refreshThumbs();
+      });
+
+      thumbs.appendChild(li);
+    });
+    status.textContent = `${state.items.length} image${state.items.length!==1?'s':''} loaded.`;
+  }
+
+  clearBtn.addEventListener('click', ()=>{
+    state.items.forEach(it=>URL.revokeObjectURL(it.url));
+    state.items = [];
+    refreshThumbs();
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    downloadBtn.disabled = true;
+    status.textContent = 'Cleared.';
+  });
+
+  // ---------- Layout helpers ----------
+  function computeGrid(n, mode, rows, cols){
+    if (mode === 'manual'){
+      rows = Math.max(1, rows|0);
+      cols = Math.max(1, cols|0);
+      return { rows, cols };
+    }
+    const colsAuto = Math.max(1, Math.ceil(Math.sqrt(Math.max(1,n))));
+    const rowsAuto = Math.max(1, Math.ceil(n / colsAuto));
+    return { rows: rowsAuto, cols: colsAuto };
+  }
+
+  function computeCanvasSize(n, rows, cols, padding, exportScale, maxW, maxH, maxWAuto, maxHAuto){
+    const aspect = cols / rows;
+    let targetLongest = Math.max(512, Math.round(2048 * exportScale));
+    let W, H;
+    if (aspect >= 1){ W = targetLongest; H = Math.round(W / aspect); }
+    else { H = targetLongest; W = Math.round(H * aspect); }
+
+    const clampW = maxWAuto ? Infinity : (Math.max(1, maxW) || Infinity);
+    const clampH = maxHAuto ? Infinity : (Math.max(1, maxH) || Infinity);
+    const s = Math.min(1, clampW / W, clampH / H);
+    W = Math.max(1, Math.round(W * s));
+    H = Math.max(1, Math.round(H * s));
+
+    const totalPadX = padding * (cols + 1);
+    const totalPadY = padding * (rows + 1);
+    const tileW = Math.max(1, Math.floor((W - totalPadX) / cols));
+    const tileH = Math.max(1, Math.floor((H - totalPadY) / rows));
+    const usedW = tileW * cols + totalPadX;
+    const usedH = tileH * rows + totalPadY;
+    const offsetX = Math.floor((W - usedW) / 2);
+    const offsetY = Math.floor((H - usedH) / 2);
+    return { canvasW: W, canvasH: H, tileW, tileH, offsetX, offsetY };
+  }
+
+  // ---------- Image fitting helpers ----------
+  /**
+   * Returns { sx, sy, sw, sh, dx, dy, dw, dh }
+   * arImg = w/h of the image, arTile = tileW/tileH
+   */
+  function computeDrawRects(imgW, imgH, tileW, tileH, fit, objPosX=0.5, objPosY=0.5) {
+    let sx=0, sy=0, sw=imgW, sh=imgH, dx=0, dy=0, dw=tileW, dh=tileH;
+
+    if (fit === 'fill') {
+      // stretch: full dst, full src
+      return {sx,sy,sw,sh,dx,dy,dw,dh};
+    }
+
+    if (fit === 'contain') {
+      // no crop; scale down to fit within tile
+      const scale = Math.min(tileW / imgW, tileH / imgH);
+      dw = Math.round(imgW * scale);
+      dh = Math.round(imgH * scale);
+      dx = Math.round((tileW - dw) / 2);
+      dy = Math.round((tileH - dh) / 2);
+      return {sx,sy,sw,sh,dx,dy,dw,dh};
+    }
+
+    // 'cover' — fill tile, crop src as needed around focal point
+    const scale = Math.max(tileW / imgW, tileH / imgH);
+    const viewW = Math.round(tileW / scale);
+    const viewH = Math.round(tileH / scale);
+    // center src window at focal point, clamp to image bounds
+    sx = Math.round(objPosX * imgW - viewW / 2);
+    sy = Math.round(objPosY * imgH - viewH / 2);
+    sx = Math.max(0, Math.min(imgW - viewW, sx));
+    sy = Math.max(0, Math.min(imgH - viewH, sy));
+    sw = viewW; sh = viewH;
+    // full destination
+    return {sx,sy,sw,sh,dx,dy,dw,dh};
+  }
+
+  /**
+   * Draws an image into a rounded tile with the given fit and optional background
+   */
+  function drawRoundedImage(ctx, img, x, y, w, h, r, fit, bg='transparent', objPos={x:0.5,y:0.5}) {
+    const rr = Math.floor(Math.min(r, w/2, h/2));
+    ctx.save();
+    // Clip rounded rect using existing utility
+    roundRect(ctx, x, y, w, h, rr); 
+    if (bg !== 'transparent') { ctx.fillStyle = bg; ctx.fill(); }
+    ctx.clip();
+
+    const imgW = img.naturalWidth || img.width;
+    const imgH = img.naturalHeight || img.height;
+
+    let {sx,sy,sw,sh,dx,dy,dw,dh} = computeDrawRects(imgW, imgH, w, h, fit, objPos.x, objPos.y);
+
+    // Respect natural resolution: avoid upscaling beyond native pixels
+    const clamp = Math.min(1, imgW / dw, imgH / dh);
+    if (clamp < 1) {
+      dw = Math.max(1, Math.round(dw * clamp));
+      dh = Math.max(1, Math.round(dh * clamp));
+      dx = Math.round((w - dw) / 2);
+      dy = Math.round((h - dh) / 2);
+    }
+
+    // Snap to integer pixels to avoid seams
+    dx = Math.round(dx); dy = Math.round(dy);
+    dw = Math.round(dw); dh = Math.round(dh);
+
+    ctx.drawImage(img, sx, sy, sw, sh, x + dx, y + dy, dw, dh);
+    ctx.restore();
+  }
+
+  // ---------- Render ----------
+  function render(){
+    if (!state.items.length){ alert('Add some images first 🙂'); return; }
+
+    const layoutMode = (document.querySelector('#modeManual')?.checked) ? 'manual' : 'auto';
+    const rowsIn = Math.max(1, +$('#rows')?.value|0);
+    const colsIn = Math.max(1, +$('#cols')?.value|0);
+    const fit = $('#fit').value; // 'cover' | 'contain' | 'stretch'
+    const pad = Math.max(0, +$('#pad').value|0);
+    const radius = Math.max(0, +$('#radius').value|0);
+    const BG = bgTxt.value || '#000';
+    const tight = !!document.querySelector('#tight')?.checked;
+
+    const maxWAuto = !!document.querySelector('#maxWAuto')?.checked;
+    const maxHAuto = !!document.querySelector('#maxHAuto')?.checked;
+    const maxW = Math.max(0, +$('#maxW')?.value|0);
+    const maxH = Math.max(0, +$('#maxH')?.value|0);
+    const exportScale = Math.max(0.5, Math.min(4, +$('#scale')?.value));
+
+    const n = state.items.length;
+    const grid = computeGrid(n, layoutMode, rowsIn, colsIn);
+    const size = computeCanvasSize(n, grid.rows, grid.cols, pad, exportScale, maxW, maxH, maxWAuto, maxHAuto);
+
+    const W = size.canvasW, H = size.canvasH;
+    const cellW = size.tileW, cellH = size.tileH;
+
+    canvas.width = W; canvas.height = H;
+
+    // background
+    ctx.fillStyle = BG; ctx.fillRect(0,0,W,H);
+
+    const total = n;
+    const lastRowCols = Math.max(1, total - (grid.rows - 1) * grid.cols);
+
+    for(let i=0;i<total;i++){
+      const r = Math.floor(i / grid.cols);
+      const c = i % grid.cols;
+
+      const colsThisRow = (tight && r === grid.rows - 1) ? Math.min(lastRowCols, grid.cols) : grid.cols;
+      const rowTotalW = pad * (colsThisRow + 1) + colsThisRow * cellW;
+      const baseX = (tight && r === grid.rows - 1) ? Math.floor((W - rowTotalW)/2) : size.offsetX;
+
+      const x = baseX + pad + c * (cellW + pad);
+      const y = size.offsetY + pad + r * (cellH + pad);
+
+      const { bitmap } = state.items[i];
+      // Map any legacy 'stretch' value to new 'fill'
+      const fitMode = (fit === 'stretch') ? 'fill' : fit;
+      const tileBg = (fitMode === 'contain') ? 'transparent' : 'transparent';
+      drawRoundedImage(ctx, bitmap, x, y, cellW, cellH, radius, fitMode, tileBg, {x:0.5,y:0.5});
+    }
+
+    const sizeMB = (W*H*4/1024/1024).toFixed(1);
+    status.textContent = `Rendered ${total} cell(s) at ${W}×${H} (~${sizeMB} MB in memory).`;
+    downloadBtn.disabled = false;
+
+    // Auto-download
+    (async ()=>{
+      const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
+      const url = URL.createObjectURL(blob);
+      const ts = new Date();
+      const p2 = n=>String(n).padStart(2,'0');
+      const name = `collage-${ts.getFullYear()}-${p2(ts.getMonth()+1)}-${p2(ts.getDate())}-${p2(ts.getHours())}${p2(ts.getMinutes())}${p2(ts.getSeconds())}.png`;
+      const a = document.createElement('a'); a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url), 2000);
+    })();
+  }
+
+  function roundRect(ctx, x, y, w, h, r){
+    ctx.beginPath();
+    ctx.moveTo(x+r, y);
+    ctx.arcTo(x+w, y, x+w, y+h, r);
+    ctx.arcTo(x+w, y+h, x, y+h, r);
+    ctx.arcTo(x, y+h, x, y, r);
+    ctx.arcTo(x, y, x+w, y, r);
+    ctx.closePath();
+  }
+
+  renderBtn.addEventListener('click', render);
+
+  // ---------- Download ----------
+  downloadBtn.addEventListener('click', async ()=>{
+    downloadBtn.disabled = true; downloadBtn.textContent='Preparing…';
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `collage_${canvas.width}x${canvas.height}.png`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 2000);
+    downloadBtn.disabled = false; downloadBtn.textContent='Download PNG';
+  });
+
+  // Sync color input ↔ text
+  bgPick.addEventListener('input', ()=>{ bgTxt.value = bgPick.value; });
+  bgTxt.addEventListener('change', ()=>{ try{ bgPick.value = toHex(bgTxt.value) }catch{} });
+
+  function toHex(css){
+    const c = document.createElement('canvas');
+    c.width = c.height = 1; const x = c.getContext('2d');
+    x.fillStyle = css; x.fillRect(0,0,1,1);
+    const d = x.getImageData(0,0,1,1).data; // [r,g,b,a]
+    const hex = '#'+[0,1,2].map(i=>d[i].toString(16).padStart(2,'0')).join('');
+    return hex;
+  }
+
+  // Demo images (procedural gradients), proves offline behavior
+  demo.addEventListener('click', (e)=>{
+    e.preventDefault();
+    const make = (i)=>{
+      const s = 640, cv = document.createElement('canvas'); cv.width=cv.height=s; const cx=cv.getContext('2d');
+      const g = cx.createLinearGradient(0,0,s,s);
+      const hue = (i*47)%360; g.addColorStop(0, `hsl(${hue} 90% 65%)`); g.addColorStop(1, `hsl(${(hue+80)%360} 90% 55%)`);
+      cx.fillStyle=g; cx.fillRect(0,0,s,s);
+      cx.fillStyle='rgba(255,255,255,.12)';
+      for(let k=0;k<400;k++){ const x=Math.random()*s,y=Math.random()*s; cx.fillRect(x,y,2,2); }
+      return new Promise(async res=>{
+        const b = await new Promise(r=>cv.toBlob(r, 'image/png')); res(new File([b], `demo_${i}.png`, {type:'image/png'}));
+      });
+    };
+    Promise.all(Array.from({length:10}, (_,i)=>make(i+1))).then(fs=>addFiles(fs));
+  });
+})();
+</script>
+</body>
+</html>
