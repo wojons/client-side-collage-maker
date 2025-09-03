@@ -102,10 +102,18 @@
         </div>
 
         <div class="row">
-          <label>Padding (px)</label>
+          <label>Padding X (px)</label>
           <div style="display:flex; gap:8px; align-items:center">
-            <input id="pad" type="range" value="8" min="0" max="200">
-            <span class="tiny" id="padVal">8</span>
+            <input id="padX" type="range" value="8" min="0" max="200">
+            <span class="tiny" id="padXVal">8</span>
+          </div>
+        </div>
+
+        <div class="row">
+          <label>Padding Y (px)</label>
+          <div style="display:flex; gap:8px; align-items:center">
+            <input id="padY" type="range" value="8" min="0" max="200">
+            <span class="tiny" id="padYVal">8</span>
           </div>
         </div>
 
@@ -154,7 +162,7 @@
         <div class="row" style="grid-template-columns: 1fr auto auto; align-items:center; margin-top:6px">
           <div></div>
           <button class="btn secondary" id="clear">Clear</button>
-          <button class="btn" id="render">Render & Download PNG</button>
+          <button class="btn" id="render">Render</button>
         </div>
       </fieldset>
     </section>
@@ -192,8 +200,10 @@
   const modeAuto = document.querySelector('#modeAuto');
   const modeManual = document.querySelector('#modeManual');
   const manualRowsCols = document.querySelector('#manualRowsCols');
-  const padRange = document.querySelector('#pad');
-  const padVal = document.querySelector('#padVal');
+  const padXRange = document.querySelector('#padX');
+  const padXVal = document.querySelector('#padXVal');
+  const padYRange = document.querySelector('#padY');
+  const padYVal = document.querySelector('#padYVal');
   const radiusRange = document.querySelector('#radius');
   const radiusVal = document.querySelector('#radiusVal');
   const maxWAutoChk = document.querySelector('#maxWAuto');
@@ -215,11 +225,12 @@
     }
     if (maxWInput) maxWInput.disabled = !!(maxWAutoChk && maxWAutoChk.checked);
     if (maxHInput) maxHInput.disabled = !!(maxHAutoChk && maxHAutoChk.checked);
-    if (padVal && padRange) padVal.textContent = String(+padRange.value|0);
+    if (padXVal && padXRange) padXVal.textContent = String(+padXRange.value|0);
+    if (padYVal && padYRange) padYVal.textContent = String(+padYRange.value|0);
     if (radiusVal && radiusRange) radiusVal.textContent = String(+radiusRange.value|0);
     if (scaleVal && scaleRange) scaleVal.textContent = `${(+scaleRange.value).toFixed(1).replace(/\.0$/,'')}x`;
   }
-  [modeAuto, modeManual, maxWAutoChk, maxHAutoChk, padRange, radiusRange, scaleRange].forEach(el => el && el.addEventListener('input', syncControls));
+  [modeAuto, modeManual, maxWAutoChk, maxHAutoChk, padXRange, padYRange, radiusRange, scaleRange].forEach(el => el && el.addEventListener('input', syncControls));
   syncControls();
 
   const state = {
@@ -274,7 +285,8 @@
         state.maxWAuto = true; state.maxHAuto = true; state.exportScale = 1;
         if (modeAuto) modeAuto.checked = true;
         if (tightChk) tightChk.checked = true;
-        if (padRange) padRange.value = String(state.padding);
+        if (padXRange) padXRange.value = String(state.padding);
+        if (padYRange) padYRange.value = String(state.padding);
         if (radiusRange) radiusRange.value = String(state.radius);
         if (scaleRange) scaleRange.value = String(state.exportScale);
         if (maxWAutoChk) maxWAutoChk.checked = true;
@@ -350,7 +362,7 @@
     return { rows: rowsAuto, cols: colsAuto };
   }
 
-  function computeCanvasSize(n, rows, cols, padding, exportScale, maxW, maxH, maxWAuto, maxHAuto){
+  function computeCanvasSize(n, rows, cols, padX, padY, exportScale, maxW, maxH, maxWAuto, maxHAuto){
     const aspect = cols / rows;
     let targetLongest = Math.max(512, Math.round(2048 * exportScale));
     let W, H;
@@ -363,8 +375,8 @@
     W = Math.max(1, Math.round(W * s));
     H = Math.max(1, Math.round(H * s));
 
-    const totalPadX = padding * (cols + 1);
-    const totalPadY = padding * (rows + 1);
+    const totalPadX = padX * (cols + 1);
+    const totalPadY = padY * (rows + 1);
     const tileW = Math.max(1, Math.floor((W - totalPadX) / cols));
     const tileH = Math.max(1, Math.floor((H - totalPadY) / rows));
     const usedW = tileW * cols + totalPadX;
@@ -451,8 +463,9 @@
     const layoutMode = (document.querySelector('#modeManual')?.checked) ? 'manual' : 'auto';
     const rowsIn = Math.max(1, +$('#rows')?.value|0);
     const colsIn = Math.max(1, +$('#cols')?.value|0);
-    const fit = $('#fit').value; // 'cover' | 'contain' | 'stretch'
-    const pad = Math.max(0, +$('#pad').value|0);
+    const fit = $('#fit').value; // 'cover' | 'contain' | 'fill'
+    const padX = Math.max(0, +$('#padX').value|0);
+    const padY = Math.max(0, +$('#padY').value|0);
     const radius = Math.max(0, +$('#radius').value|0);
     const BG = bgTxt.value || '#000';
     const tight = !!document.querySelector('#tight')?.checked;
@@ -465,7 +478,7 @@
 
     const n = state.items.length;
     const grid = computeGrid(n, layoutMode, rowsIn, colsIn);
-    const size = computeCanvasSize(n, grid.rows, grid.cols, pad, exportScale, maxW, maxH, maxWAuto, maxHAuto);
+    const size = computeCanvasSize(n, grid.rows, grid.cols, padX, padY, exportScale, maxW, maxH, maxWAuto, maxHAuto);
 
     const W = size.canvasW, H = size.canvasH;
     const cellW = size.tileW, cellH = size.tileH;
@@ -483,11 +496,11 @@
       const c = i % grid.cols;
 
       const colsThisRow = (tight && r === grid.rows - 1) ? Math.min(lastRowCols, grid.cols) : grid.cols;
-      const rowTotalW = pad * (colsThisRow + 1) + colsThisRow * cellW;
+      const rowTotalW = padX * (colsThisRow + 1) + colsThisRow * cellW;
       const baseX = (tight && r === grid.rows - 1) ? Math.floor((W - rowTotalW)/2) : size.offsetX;
 
-      const x = baseX + pad + c * (cellW + pad);
-      const y = size.offsetY + pad + r * (cellH + pad);
+      const x = baseX + padX + c * (cellW + padX);
+      const y = size.offsetY + padY + r * (cellH + padY);
 
       const { bitmap } = state.items[i];
       // Map any legacy 'stretch' value to new 'fill'
@@ -499,18 +512,6 @@
     const sizeMB = (W*H*4/1024/1024).toFixed(1);
     status.textContent = `Rendered ${total} cell(s) at ${W}×${H} (~${sizeMB} MB in memory).`;
     downloadBtn.disabled = false;
-
-    // Auto-download
-    (async ()=>{
-      const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
-      const url = URL.createObjectURL(blob);
-      const ts = new Date();
-      const p2 = n=>String(n).padStart(2,'0');
-      const name = `collage-${ts.getFullYear()}-${p2(ts.getMonth()+1)}-${p2(ts.getDate())}-${p2(ts.getHours())}${p2(ts.getMinutes())}${p2(ts.getSeconds())}.png`;
-      const a = document.createElement('a'); a.href = url; a.download = name;
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(()=>URL.revokeObjectURL(url), 2000);
-    })();
   }
 
   function roundRect(ctx, x, y, w, h, r){

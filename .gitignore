@@ -1,0 +1,5 @@
+# OS artifacts
+.DS_Store
+
+# Local test assets (not required for app)
+demo/
